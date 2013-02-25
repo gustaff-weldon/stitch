@@ -1,8 +1,9 @@
 _     = require 'underscore'
 async = require 'async'
 fs    = require 'fs'
-
+minimatch = require "minimatch"
 {extname, join, normalize} = require 'path'
+
 
 exports.compilers = compilers =
   js: (module, filename) ->
@@ -136,17 +137,46 @@ exports.Package = class Package
 
 
   gatherSourcesFromPath: (sources, sourcePath, callback) ->
+
+    # no discriminating patterns by default, meaning all files get a chance
+    patterns = []
+
+    # pathItem can be an object with base path and patterns array
+    if typeof sourcePath is "object"
+      patterns = sourcePath.patterns
+      sourcePath = sourcePath.path
+
     fs.stat sourcePath, (err, stat) =>
       return callback err if err
 
       if stat.isDirectory()
         @getFilesInTree sourcePath, (err, paths) =>
           return callback err if err
+
+          paths = @filterPaths( paths, patterns )
+
           async.reduce paths, sources, _.bind(@gatherCompilableSource, @), callback
       else
-        @gatherCompilableSource sources, sourcePath, callback
+        # check if path matches
+        if @filterPaths( [ sourcePath ], patterns ).length
+          @gatherCompilableSource sources, sourcePath, callback
+        else
+          callback null, sources
+
+
+  # return only these paths that match after being passed via patterns
+  # note that patterns are matched in order
+  filterPaths: ( paths, patterns ) ->
+    return _.filter( paths, ( path ) ->
+      matches = true
+      for pattern in patterns
+        matches = minimatch( path, pattern )
+      return matches
+    )
+
 
   gatherCompilableSource: (sources, path, callback) ->
+
     if @compilers[extname(path).slice(1)]
       @getRelativePath path, (err, relativePath) =>
         return callback err if err
